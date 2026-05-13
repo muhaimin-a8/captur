@@ -7,6 +7,7 @@ use screenshots::Screen;
 use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
 use s3s_fs::FileSystem;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::{
     net::TcpListener,
@@ -34,6 +35,26 @@ struct Cli {
 
     #[arg(long, default_value = "captur")]
     bucket: String,
+}
+
+fn get_local_ips() -> Vec<IpAddr> {
+    let mut ips = Vec::new();
+    let external = "8.8.8.8:80";
+    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        let _ = socket.connect(external);
+        if let Ok(local) = socket.local_addr() {
+            ips.push(local.ip());
+        }
+    }
+    if ips.is_empty() {
+        if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+            let _ = socket.connect("1.1.1.1:80");
+            if let Ok(local) = socket.local_addr() {
+                ips.push(local.ip());
+            }
+        }
+    }
+    ips
 }
 
 #[tokio::main]
@@ -70,9 +91,17 @@ async fn main() -> Result<()> {
         TcpListener::bind(&addr)
             .await?;
 
+    let ips = get_local_ips();
+    let ip_str = if ips.is_empty() {
+        String::new()
+    } else {
+        let ip_list: Vec<String> = ips.iter().map(|ip| format!("http://{}:{}", ip, cli.port)).collect();
+        format!(" | {}", ip_list.join(" | "))
+    };
+
     println!(
-        "S3 server running at http://localhost:{}",
-        cli.port
+        "S3 server running at http://localhost:{}{}",
+        cli.port, ip_str
     );
 
     let interval = cli.interval;
