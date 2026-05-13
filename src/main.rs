@@ -8,6 +8,8 @@ use s3s::auth::SimpleAuth;
 use s3s::service::S3ServiceBuilder;
 use s3s_fs::FileSystem;
 use std::net::IpAddr;
+
+const INDEX_HTML: &str = include_str!("index.html");
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::{
@@ -25,8 +27,11 @@ struct Cli {
     #[arg(long, default_value = "8016")]
     config_port: u16,
 
-    #[arg(long, default_value = "3")]
+    #[arg(long, default_value = "30")]
     interval: u64,
+
+    #[arg(long)]
+    index_path: Option<String>,
 
     #[arg(long, default_value = "captur")]
     key_id: String,
@@ -61,7 +66,7 @@ fn get_local_ips() -> Vec<IpAddr> {
     ips
 }
 
-async fn run_config_server(port: u16, interval: Arc<AtomicU64>, running: Arc<AtomicBool>) -> Result<()> {
+async fn run_config_server(port: u16, interval: Arc<AtomicU64>, running: Arc<AtomicBool>, index_path: Option<String>) -> Result<()> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = TcpListener::bind(&addr).await?;
 
@@ -71,14 +76,15 @@ async fn run_config_server(port: u16, interval: Arc<AtomicU64>, running: Arc<Ato
         let (stream, _) = listener.accept().await?;
         let interval = interval.clone();
         let running = running.clone();
+        let index_path = index_path.clone();
 
         tokio::spawn(async move {
-            let _ = handle_config_request(stream, interval, running).await;
+            let _ = handle_config_request(stream, interval, running, index_path).await;
         });
     }
 }
 
-async fn handle_config_request(mut stream: tokio::net::TcpStream, interval: Arc<AtomicU64>, running: Arc<AtomicBool>) -> Result<()> {
+async fn handle_config_request(mut stream: tokio::net::TcpStream, interval: Arc<AtomicU64>, running: Arc<AtomicBool>, index_path: Option<String>) -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let mut buffer = [0u8; 4096];
@@ -87,9 +93,11 @@ async fn handle_config_request(mut stream: tokio::net::TcpStream, interval: Arc<
     let request = String::from_utf8_lossy(&buffer[..n]);
 
     let (status, body, content_type) = if request.starts_with("GET /") && (request.starts_with("GET / ") || request.starts_with("GET /index.html")) {
-        let html = tokio::fs::read_to_string("index.html").await.unwrap_or_else(|_| {
-            "<html><body><h1>index.html not found</h1></body></html>".to_string()
-        });
+        let html = if let Some(ref path) = index_path {
+            tokio::fs::read_to_string(path).await.unwrap_or_else(|_| INDEX_HTML.to_string())
+        } else {
+            INDEX_HTML.to_string()
+        };
         ("200 OK", html, "text/html")
     } else if request.starts_with("GET /interval") {
         let current = interval.load(Ordering::Relaxed);
@@ -221,7 +229,7 @@ async fn main() -> Result<()> {
     let config_interval = interval.clone();
     let config_running = running.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_config_server(cli.config_port, config_interval, config_running).await {
+        if let Err(e) = run_config_server(cli.config_port, config_interval, config_running, cli.index_path).await {
             eprintln!("config server error: {}", e);
         }
     });

@@ -5,7 +5,7 @@ S3-based screen capture server.
 ## Usage
 
 ```bash
-cargo run -- --port 8014 --config-port 8016 --interval 3
+cargo run -- --port 8014 --config-port 8016 --interval 30
 ```
 
 ### CLI Options
@@ -14,7 +14,8 @@ cargo run -- --port 8014 --config-port 8016 --interval 3
 |--------|---------|-------------|
 | `--port` | 8014 | S3 server port |
 | `--config-port` | 8016 | Config API port |
-| `--interval` | 3 | Capture interval in seconds |
+| `--interval` | 30 | Capture interval in seconds |
+| `--index-path` | index.html | Path to index.html for web UI |
 | `--key-id` | captur | S3 access key |
 | `--secret-key` | captur123 | S3 secret key |
 | `--storage-dir` | ./data | Storage directory |
