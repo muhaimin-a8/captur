@@ -15,7 +15,7 @@ use tokio::{
 
 #[derive(Parser, Debug)]
 #[command(name = "captur")]
-#[command(about = "S3-based screen capture server")]
+// #[command(about = "S3-based screen capture server")]
 struct Cli {
     #[arg(long, default_value = "8014")]
     port: u16,
@@ -111,12 +111,40 @@ async fn main() -> Result<()> {
 }
 
 async fn capture(storage_dir: &str, bucket: &str) -> Result<()> {
-    let screen = Screen::all()?
-        .into_iter()
-        .next()
-        .unwrap();
+    use image::{ImageBuffer, RgbaImage};
 
-    let image = screen.capture()?;
+    let screens = Screen::all()?;
+
+    let mut captures = vec![];
+
+    let mut total_width = 0;
+    let mut max_height = 0;
+
+    for screen in screens {
+        let img = screen.capture()?;
+
+        total_width += img.width();
+
+        max_height = max_height.max(img.height());
+
+        captures.push(img);
+    }
+
+    let mut canvas: RgbaImage = ImageBuffer::new(total_width, max_height);
+
+    let mut offset_x = 0;
+
+    for img in captures {
+        let width = img.width();
+        let height = img.height();
+        let buffer = img.into_raw();
+
+        let rgba = RgbaImage::from_raw(width, height, buffer).unwrap();
+
+        image::imageops::overlay(&mut canvas, &rgba, offset_x.into(), 0);
+
+        offset_x += rgba.width();
+    }
 
     let filename = format!(
         "{}/{}/{}.png",
@@ -125,7 +153,7 @@ async fn capture(storage_dir: &str, bucket: &str) -> Result<()> {
         Utc::now().timestamp()
     );
 
-    image.save(&filename)?;
+    canvas.save(&filename)?;
 
     println!("saved {}", filename);
 
