@@ -302,6 +302,7 @@ dependencies = [
  "s3s",
  "s3s-fs",
  "screenshots",
+ "serde_json",
  "tokio",
  "tracing-subscriber",
 ]
