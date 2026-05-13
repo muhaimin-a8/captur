@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use clap::Parser;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use screenshots::Screen;
@@ -12,26 +13,48 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-const STORAGE_DIR: &str = "./data";
-const BUCKET: &str = "captur";
+#[derive(Parser, Debug)]
+#[command(name = "captur")]
+#[command(about = "S3-based screen capture server")]
+struct Cli {
+    #[arg(long, default_value = "8014")]
+    port: u16,
+
+    #[arg(long, default_value = "3")]
+    interval: u64,
+
+    #[arg(long, default_value = "captur")]
+    key_id: String,
+
+    #[arg(long, default_value = "captur123")]
+    secret_key: String,
+
+    #[arg(long, default_value = "./data")]
+    storage_dir: String,
+
+    #[arg(long, default_value = "captur")]
+    bucket: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
 
+    let cli = Cli::parse();
+
     tokio::fs::create_dir_all(format!(
         "{}/{}",
-        STORAGE_DIR,
-        BUCKET
+        cli.storage_dir,
+        cli.bucket
     ))
     .await?;
 
-    let fs = FileSystem::new(STORAGE_DIR)
+    let fs = FileSystem::new(&cli.storage_dir)
         .map_err(|e| anyhow!("{e:?}"))?;
 
     let auth = SimpleAuth::from_single(
-        "captur",
-        "captur123",
+        cli.key_id,
+        s3s::auth::SecretKey::from(cli.secret_key),
     );
 
     let mut builder =
@@ -42,20 +65,23 @@ async fn main() -> Result<()> {
     let service =
         Arc::new(builder.build().into_shared());
 
+    let addr = format!("0.0.0.0:{}", cli.port);
     let listener =
-        TcpListener::bind("0.0.0.0:8014")
+        TcpListener::bind(&addr)
             .await?;
 
     println!(
-        "S3 server running at http://localhost:8014"
+        "S3 server running at http://localhost:{}",
+        cli.port
     );
 
-    tokio::spawn(async {
+    let interval = cli.interval;
+    tokio::spawn(async move {
         loop {
-            sleep(Duration::from_secs(3))
+            sleep(Duration::from_secs(interval))
                 .await;
 
-            if let Err(err) = capture().await {
+            if let Err(err) = capture(&cli.storage_dir, &cli.bucket).await {
                 eprintln!(
                     "capture error: {err}"
                 );
@@ -84,7 +110,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn capture() -> Result<()> {
+async fn capture(storage_dir: &str, bucket: &str) -> Result<()> {
     let screen = Screen::all()?
         .into_iter()
         .next()
@@ -94,8 +120,8 @@ async fn capture() -> Result<()> {
 
     let filename = format!(
         "{}/{}/{}.png",
-        STORAGE_DIR,
-        BUCKET,
+        storage_dir,
+        bucket,
         Utc::now().timestamp()
     );
 
